@@ -79,7 +79,7 @@ function render() {
 
   // (3) 목록 아래의 '남은 할 일' 개수와 안내 문구를 갱신한다.
   const remaining = todos.filter((todo) => todo.done === false).length;
-  countText.textContent = '남은 할일 ' + remaining + '개';
+  countText.textContent = '남은 할 일 ' + remaining + '개';
 
   if(todos.length == 0) {
    emptyMsg.classList.add('show');
