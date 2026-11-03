@@ -7,19 +7,50 @@ const list = document.querySelector('.todo-list');
 const emptyMsg = document.querySelector('.empty-msg');
 const countText = document.querySelector('.todo-count');
 const clearBtn = document.querySelector('.clear-btn');
+const nowTime = document.querySelector('.now-time');
+const dueInput = document.querySelector('.todo-due-input');
 
+
+/*
+   2. 상수 생성
+*/
+const STORAGE_KEY = 'todo-list-v2';
+const HOUR = 60 * 60 * 1000;
+const SAFE_HOURS = 24;
+const URGENT_HOURS = 5;
+
+
+/* 
+   3. 저장하기 / 불러오기
+*/
+function saveTodos() {
+   localStorage.setItem(STORAGE_KEY, JSON.stringify(todos));
+}
+
+function loadTodos() {
+   const saved = localStorage.getItem(STORAGE_KEY);
+   if (saved == null) {
+      return [];     // 처음 실행: 빈 목록으로 시작
+   }
+   try {
+      const data = JSON.parse(saved);     // 글자 -> 배열
+      return Array.isArray(data) ? data : [];
+   } catch (error) {
+      return[];      // 저장된 글자가 깨져 있어도 멈추지 않는다.
+   }
+}
 
 /* ---------------------------------------------------------
    2. 데이터: 할 일 목록을 '배열'에 저장한다.
       배열 안의 각 항목은 { text: 글자, done: 완료 여부 } 객체이다.
       핵심: 화면(HTML)이 아니라 이 배열이 '진짜 데이터'이다.
    --------------------------------------------------------- */
-let todos = [
-   { text: 'HTML 복습하기', done: true },
-   { text: '자바스크립트 배열 공부하기', done: false },
-   { text: 'To-do List 직접 만들어 보기', done: false }
-];
-
+// let todos = [
+//    { text: 'HTML 복습하기', done: true },
+//    { text: '자바스크립트 배열 공부하기', done: false },
+//    { text: 'To-do List 직접 만들어 보기', done: false }
+// ];
+let todos = loadTodos();
 
 /* ---------------------------------------------------------
    3. 화면 그리기 함수 render()
@@ -42,12 +73,19 @@ function render() {
          li.classList.add('done');  // 완료된 항목은 취소선으로 스타일 적용
       }
 
+      // 남은 시간에 따라 li에 safe, urgent, overdue 클래스를 붙인다.
+      const status = getStatus(todo);
+      if(status !== 'none') {
+         li.classList.add(status);
+      }
+
       // 체크박스 만들기
       const check = document.createElement('input');
       check.type = 'checkbox';
       check.checked = todo.done;
       check.addEventListener('change', () => {
          todos[index].done = check.checked;
+         saveTodos();      // 저장
          render();
       });
 
@@ -56,6 +94,39 @@ function render() {
       span.classList.add('todo-text');
       span.textContent = todo.text;
 
+      // [추가] 글자와 마감 정보를 세로로 묶을 상자
+      const body = document.createElement('div');
+      body.classList.add('todo-body');
+      body.appendChild(span);
+
+      // [추가] 완료 일시가 있는 항목에만 안내 줄을 만든다
+      if (todo.due) {
+         const dueLine = document.createElement('span');
+         dueLine.classList.add('todo-due')
+
+         // "10/23 18:00 ∙ 3시간 20분 남음" (완료한 항목은 남은 시간을 보여줄 필요가 없다.)
+         let info = formatDue(todo.due);
+
+         if(!todo.done) {
+            const remaining = getRemaining(todo);
+            info += ' . ' + (remaining < 0 ? '기한이 지났습니다.' : fotmatRemaining(remaining));
+         }
+
+         // 5시간 이내 일때만 깜빡이는 아이콘 추가.
+         if(status === 'urgent') {
+            const icon = document.createElement('span');
+            icon.classList.add('blank-icon');
+            icon.textContent = '😡';
+            dueLine.appendChild(icon);
+         }
+
+         const infoText = document.createElement('span');
+         infoText.textContent = info;
+         dueLine.appendChild(infoText);
+
+         body.appendChild(dueLine);
+      }
+
       // 삭제 버튼 만들기
       const delBtn = document.createElement('button');
       delBtn.classList.add('del-btn');
@@ -63,12 +134,13 @@ function render() {
       delBtn.textContent = '삭제';
       delBtn.addEventListener('click', () => {
          todos.splice(index, 1);    // 배열에서 index위치부터 1개 삭제
+         saveTodos();      // 저장
          render();
       });
 
       // li 안에 자식 요소를 차례대로 넣고, 
       li.appendChild(check);
-      li.appendChild(span);
+      li.appendChild(body);
       li.appendChild(delBtn);
 
       // 완성된 li를 ul에 붙인다.
@@ -79,7 +151,7 @@ function render() {
 
   // (3) 목록 아래의 '남은 할 일' 개수와 안내 문구를 갱신한다.
   const remaining = todos.filter((todo) => todo.done === false).length;
-  countText.textContent = '남은 할 일 ' + remaining + '개';
+  countText.textContent = '남은 할일 ' + remaining + '개';
 
   if(todos.length == 0) {
    emptyMsg.classList.add('show');
@@ -109,13 +181,69 @@ form.addEventListener('submit', (event) => {
    }
 
    // 배열 맨 뒤에 새 항목으로 추가하기
-   todos.push({text: text, done: false});
+   todos.push({text: text, done: false, due: dueInput.value});
 
-   input.value = '';
+   saveTodos();   // [추가] 저장
+
+   input.value = '';       // 할 일 입력창 비우기
+   dueInput.value = '';    // 날짜 시간 입력창 비우기
    input.focus();
    render();
 });
 
+
+/*
+   날짜 추가
+*/
+// "2026-10-23T18:00" -> "10/23 18:00"
+function formatDue(due) {
+   const d = new Date(due);
+   const month = d.getMonth() + 1;
+   const hours = String(d.getHours()).padStart(2, '0');
+   const minutes = String(d.getMinutes()).padStart(2, '0');
+   return month + '/' + d.getDate() + ' ' + hours + ':' + minutes;
+} 
+
+// 현재 시간부터 완료 일시까지 남은 시간 계산(밀리초)
+// 이미 지났으면 음수로 나옴.
+function getRemaining(todo) {
+   return new Date(todo.due).getTime() - Date.now();
+}
+
+// 남은 밀리초 계산
+function fotmatRemaining(remaining) {
+   const totalMinutes = Math.floor(remaining / 60000);
+   const days = Math.floor(totalMinutes / (60 * 24));
+   const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+   const minutes = totalMinutes % 60;
+
+   if(days > 0) {
+      return days + '일' + hours + '시간 남음';
+   }
+   if(hours > 0) {
+      return hours + '시간' + minutes + "분 남음";     
+   }
+   return minutes + '분 남음';
+}
+
+// 할 일의 남은 시간에 따라 글자 색 지정.
+function getStatus(todo) {
+   if(todo.done || !todo.due) {
+      return 'none';
+   }
+
+   const remaining = getRemaining(todo);
+   if(remaining < 0) {
+      return 'overdue';
+   }
+   if (remaining <= URGENT_HOURS * HOUR) {
+      return 'urgent';
+   }
+   if(remaining <= SAFE_HOURS * HOUR) {
+      return 'safe';
+   }
+   return 'none';
+}
 
 /* ---------------------------------------------------------
    5. 완료 항목 삭제
@@ -124,11 +252,35 @@ form.addEventListener('submit', (event) => {
    --------------------------------------------------------- */
 clearBtn.addEventListener('click', () => {
    todos = todos.filter((todo) => todo.done === false);
+   saveTodos();      // 저장
    render();
 });
 
 
 /* ---------------------------------------------------------
+   7. 현재 시간 표시
+   --------------------------------------------------------- */
+const DAYS = ['일', '월', '화', '수', '목', '금', '토'];
+
+function showNow() {
+   const d = new Date();
+   const hours = String(d.getHours()).padStart(2, '0');
+   const minutes = String(d.getMinutes()).padStart(2, '0');
+   const seconds = String(d.getSeconds()).padStart(2, '0');
+
+   nowTime.innerHTML = d.getFullYear() + '년 ' + (d.getMonth() + 1) + '월 ' +
+   d.getDate() + '일 (' + DAYS[d.getDay()] + ') ' + 
+   '<span class="clock">' + hours + ":" + minutes + ':' + seconds + '</span>' ; 
+   
+   setInterval(showNow, 1000);
+}
+
+/* 시간이 흐르면 색상이 바뀐다.  */
+setInterval(render, 60 * 1000);
+
+
+/* ---------------------------------------------------------
    6. 페이지를 열자마자 처음 한 번 그린다.
    --------------------------------------------------------- */
-render();
+   showNow();
+   render();
